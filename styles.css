@@ -139,7 +139,7 @@ input[type='search'] {
 }
 
 .checkbox-label {
-  align-content: end;
+  align-content: center;
   grid-template-columns: auto 1fr;
   align-items: center;
   min-height: 42px;

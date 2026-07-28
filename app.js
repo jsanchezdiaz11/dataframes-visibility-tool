@@ -8,6 +8,7 @@ const elements = {
   search: document.querySelector('#search'),
   differencesOnly: document.querySelector('#differences-only'),
   comparisonStatus: document.querySelector('#comparison-status'),
+  columnPickers: [...document.querySelectorAll('.column-picker')],
   left: {
     title: document.querySelector('#left-title'),
     container: document.querySelector('#left-container'),
@@ -646,6 +647,16 @@ elements.right.showAllColumns.addEventListener('click', () => {
   updateColumnPicker('right');
   renderComparison();
 });
+
+document.addEventListener('click', event => {
+  // If the click happened outside the details element, remove the "open" attribute
+  elements.columnPickers.forEach(picker => {
+    if (!picker.contains(event.target)) {
+      picker.removeAttribute('open');
+    }
+  });
+});
+
 elements.runQuery.addEventListener('click', executeQuery);
 elements.queryEditorFallback.addEventListener('keydown', event => {
   if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
