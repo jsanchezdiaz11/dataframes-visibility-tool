@@ -1,0 +1,5 @@
+*.csv
+.lsp
+.clj-kondo
+node_modules
+.env.local

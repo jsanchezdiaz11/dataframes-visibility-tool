@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DataFrame CSV viewer</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main>
+      <h1>DataFrame CSV viewer</h1>
+      <p class="description">Inspect, compare, and query local CSV exports with Polars.</p>
+
+      <div class="tabs" role="tablist">
+        <button class="tab" type="button" role="tab" aria-selected="true" data-panel="#compare">
+          Compare
+        </button>
+        <button class="tab" type="button" role="tab" aria-selected="false" data-panel="#query">
+          Query
+        </button>
+      </div>
+
+      <section id="compare" class="panel" role="tabpanel">
+        <div class="controls">
+          <label>
+            Left DataFrame
+            <select id="left-dataset"></select>
+          </label>
+          <label>
+            Right DataFrame
+            <select id="right-dataset"></select>
+          </label>
+          <div class="column-control">
+            <span>Left columns</span>
+            <details class="column-picker">
+              <summary id="left-column-summary">All columns</summary>
+              <div class="column-picker-content">
+                <button id="left-show-all-columns" type="button">Show all</button>
+                <div id="left-column-options"></div>
+              </div>
+            </details>
+          </div>
+          <div class="column-control">
+            <span>Right columns</span>
+            <details class="column-picker">
+              <summary id="right-column-summary">All columns</summary>
+              <div class="column-picker-content">
+                <button id="right-show-all-columns" type="button">Show all</button>
+                <div id="right-column-options"></div>
+              </div>
+            </details>
+          </div>
+          <label>
+            Left row key
+            <select id="left-match-column"></select>
+          </label>
+          <label>
+            Right row key
+            <select id="right-match-column"></select>
+          </label>
+          <label>
+            Search values
+            <input id="search" type="search" placeholder="Filter rows…" autocomplete="off" />
+          </label>
+          <label class="checkbox-label">
+            <input id="differences-only" type="checkbox" />
+            Differences only
+          </label>
+        </div>
+
+        <p id="comparison-status" class="status" role="status"></p>
+        <div class="legend">
+          <span class="legend-item"
+            ><span class="swatch" style="background: var(--changed)"></span>Changed cell</span
+          >
+          <span class="legend-item"
+            ><span class="swatch" style="background: var(--left-only)"></span>Left only</span
+          >
+          <span class="legend-item"
+            ><span class="swatch" style="background: var(--right-only)"></span>Right only</span
+          >
+        </div>
+
+        <div class="comparison-grid">
+          <section class="frame-panel">
+            <h3 id="left-title"></h3>
+            <div class="table-container" id="left-container">
+              <table>
+                <thead id="left-head"></thead>
+                <tbody id="left-body"></tbody>
+              </table>
+              <div id="left-empty" class="empty" hidden></div>
+            </div>
+          </section>
+          <section class="frame-panel">
+            <h3 id="right-title"></h3>
+            <div class="table-container" id="right-container">
+              <table>
+                <thead id="right-head"></thead>
+                <tbody id="right-body"></tbody>
+              </table>
+              <div id="right-empty" class="empty" hidden></div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section id="query" class="panel" role="tabpanel" hidden>
+        <div class="query-layout">
+          <aside class="query-sidebar">
+            <h2>DataFrames</h2>
+            <p class="hint">Select the CSV files available to the query.</p>
+            <div id="query-dataframes" class="query-dataframes"></div>
+            <p class="warning">
+              Queries execute trusted local JavaScript. Do not paste untrusted code.
+            </p>
+          </aside>
+
+          <div class="query-workspace">
+            <section class="query-editor-card">
+              <h2>Polars query</h2>
+              <p class="hint">
+                Return a DataFrame or LazyDataFrame using <code>pl</code> and
+                <code>frames.&lt;name&gt;</code>.
+              </p>
+              <div id="query-editor" class="query-editor" aria-label="Polars query"></div>
+              <textarea
+                id="query-editor-fallback"
+                class="query-editor query-editor-fallback"
+                aria-label="Polars query"
+                spellcheck="false"
+                hidden
+              ></textarea>
+              <div class="query-actions">
+                <span class="hint">Run with Cmd/Ctrl + Enter</span>
+                <button id="run-query" class="primary-button" type="button">Run query</button>
+              </div>
+              <p id="query-status" class="status" role="status"></p>
+            </section>
+
+            <section id="query-output" class="query-output" hidden>
+              <h2>Result</h2>
+              <p id="query-metadata" class="query-metadata"></p>
+              <div class="table-container">
+                <table>
+                  <thead id="query-head"></thead>
+                  <tbody id="query-body"></tbody>
+                </table>
+              </div>
+              <details class="query-plan">
+                <summary>Query plan</summary>
+                <pre id="query-plan"></pre>
+              </details>
+              <details class="query-plan">
+                <summary>Optimized query plan</summary>
+                <pre id="query-optimized-plan"></pre>
+              </details>
+            </section>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script
+      src="https://cdn.jsdelivr.net/npm/monaco-editor@0.56.0/min/vs/loader.js"
+      integrity="sha384-jwxunh5pHKFzi60XobDcwOM7qnk4lSGpdBU/hNn9pUGp+ZUpaHJqadNLRF2k+jPu"
+      crossorigin="anonymous"
+    ></script>
+    <script src="app.js"></script>
+  </body>
+</html>
