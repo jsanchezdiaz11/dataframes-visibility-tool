@@ -17,7 +17,7 @@ Run the code path that produces the DataFrame.
 
 First install nodejs-polars running:
 ```bash
-npm install
+pnpm install
 ```
 
 From the repository root:
