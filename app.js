@@ -611,7 +611,7 @@ const initialize = async () => {
     elements.rightDataset.selectedIndex = availableFiles.length > 1 ? 1 : 0;
     setQueryCode(
       sessionStorage.getItem('dataframe-debug-query') ??
-        `frames.${availableFiles[0].alias}\n  .limit(100)`,
+        `return frames.${availableFiles[0].alias}\n  .limit(100)`,
     );
     await loadComparison();
   } catch (error) {

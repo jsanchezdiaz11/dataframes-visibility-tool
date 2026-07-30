@@ -34,9 +34,11 @@ const run = async () => {
   const frames = Object.fromEntries(
     workerData.files.map(({ alias, path }) => [alias, pl.scanCSV(path)]),
   );
+
   const AsyncFunction = Object.getPrototypeOf(run).constructor;
   const queryExpression = workerData.code.trim().replace(/;$/, '');
-  const execute = new AsyncFunction('pl', 'frames', `"use strict"; return (${queryExpression});`);
+  
+  const execute = new AsyncFunction('pl', 'frames', `"use strict"; ${queryExpression}`);
   const startedAt = performance.now();
   const result = await execute(pl, frames);
 
