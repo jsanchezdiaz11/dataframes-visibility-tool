@@ -30,9 +30,22 @@ const isLazyDataFrame = value =>
 
 const isDataFrame = value => value && typeof value.toRecords === 'function';
 
+const scanDataframe = ({ path, kind }) => {
+  switch (kind) {
+    case 'csv':
+      return pl.scanCSV(path);
+    case 'parquet':
+      return pl.scanParquet(path);
+    case 'ipc':
+      return pl.scanIPC(path);
+    default:
+      throw new Error(`Unsupported DataFrame format: ${kind ?? 'unknown'}`);
+  }
+};
+
 const run = async () => {
   const frames = Object.fromEntries(
-    workerData.files.map(({ alias, path }) => [alias, pl.scanCSV(path)]),
+    workerData.files.map(file => [file.alias, scanDataframe(file)]),
   );
 
   const AsyncFunction = Object.getPrototypeOf(run).constructor;
@@ -60,6 +73,7 @@ const run = async () => {
   const rows = allRows.slice(0, workerData.rowLimit).map(serializeValue);
   parentPort.postMessage({
     columns: dataFrame.columns,
+    columnTypes: dataFrame.dtypes.map(dtype => dtype.constructor?.name ?? String(dtype)),
     rows,
     rowCount: rows.length,
     truncated,

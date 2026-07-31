@@ -3,13 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>DataFrame CSV viewer</title>
+    <title>DataFrame viewer</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <main>
-      <h1>DataFrame CSV viewer</h1>
-      <p class="description">Inspect, compare, and query local CSV exports with Polars.</p>
+      <h1>DataFrame viewer</h1>
+      <p class="description">Inspect, compare, and query local CSV, Parquet, and IPC exports with Polars.</p>
 
       <div class="tabs" role="tablist">
         <button class="tab" type="button" role="tab" aria-selected="true" data-panel="#compare">
@@ -109,7 +109,7 @@
         <div class="query-layout">
           <aside class="query-sidebar">
             <h2>DataFrames</h2>
-            <p class="hint">Select the CSV files available to the query.</p>
+            <p class="hint">Select the DataFrame files available to the query.</p>
             <div id="query-dataframes" class="query-dataframes"></div>
             <p class="warning">
               Queries execute trusted local JavaScript. Do not paste untrusted code.

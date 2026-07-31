@@ -1,5 +1,6 @@
-*.csv
+input/*
 .lsp
 .clj-kondo
 node_modules
 .env.local
+.DS_Store

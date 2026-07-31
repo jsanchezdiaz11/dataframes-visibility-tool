@@ -44,10 +44,16 @@ const elements = {
 
 const MONACO_BASE_URL = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.56.0/min/vs';
 
+const describeDataframeFile = file => {
+  const filename = file.name ?? file.filename ?? 'unknown';
+  const metadataLabel = file.metadataLabel ? ` · ${file.metadataLabel}` : '';
+  return `${filename} · ${file.label}${metadataLabel}`;
+};
+
 let availableFiles = [];
 let frames = {
-  left: { filename: '', columns: [], rows: [] },
-  right: { filename: '', columns: [], rows: [] },
+  left: { filename: '', columns: [], columnTypes: [], rows: [] },
+  right: { filename: '', columns: [], columnTypes: [], rows: [] },
 };
 let sort = { side: '', column: '', direction: 'ascending' };
 let visibleColumns = { left: new Set(), right: new Set() };
@@ -326,16 +332,26 @@ const createCell = (value, changed = false) => {
 };
 
 const renderHeader = (side, columns) => {
+  const frame = frames[side];
   const frameElements = elements[side];
   frameElements.head.replaceChildren();
   const headerRow = document.createElement('tr');
   columns.forEach(column => {
     const header = document.createElement('th');
     const button = document.createElement('button');
+    const title = document.createElement('span');
+    const subtitle = document.createElement('span');
     const isSorted = sort.side === side && sort.column === column;
     const sortMarker = sort.direction === 'ascending' ? ' ↑' : ' ↓';
+    const columnIndex = frame.columns.indexOf(column);
     button.type = 'button';
-    button.textContent = `${column}${isSorted ? sortMarker : ''}`;
+    button.className = 'column-header';
+    title.className = 'column-header-title';
+    subtitle.className = 'column-header-type';
+    title.textContent = `${column}${isSorted ? sortMarker : ''}`;
+    subtitle.textContent = frame.columnTypes?.[columnIndex] ?? '';
+    subtitle.hidden = subtitle.textContent === '';
+    button.append(title, subtitle);
     button.addEventListener('click', () => {
       sort = {
         side,
@@ -402,22 +418,23 @@ const renderComparison = () => {
 };
 
 const loadDataset = async filename => {
-  const response = await fetch(filename, { cache: 'no-store' });
+  const response = await fetch(`/api/dataframe?filename=${encodeURIComponent(filename)}`, {
+    cache: 'no-store',
+  });
   if (!response.ok) {
     throw new Error(`Could not load ${filename} (HTTP ${response.status})`);
   }
-  const [columns = [], ...rows] = parseCsv(await response.text());
-  return { filename, columns, rows };
+  return response.json();
 };
 
 const loadDatasetFiles = async () => {
-  const response = await fetch('/api/csv-files', { cache: 'no-store' });
+  const response = await fetch('/api/dataframe-files', { cache: 'no-store' });
   if (!response.ok) {
-    throw new Error(`Could not discover CSV files (HTTP ${response.status})`);
+    throw new Error(`Could not discover DataFrame files (HTTP ${response.status})`);
   }
   const result = await response.json();
   if (!Array.isArray(result.files)) {
-    throw new Error('CSV file endpoint returned an invalid response');
+    throw new Error('DataFrame file endpoint returned an invalid response');
   }
   return result.files;
 };
@@ -482,8 +499,8 @@ const loadComparison = async () => {
     frames = { left, right };
     sort = { side: '', column: '', direction: 'ascending' };
     visibleColumns = { left: new Set(left.columns), right: new Set(right.columns) };
-    elements.left.title.textContent = left.filename;
-    elements.right.title.textContent = right.filename;
+    elements.left.title.textContent = describeDataframeFile(left);
+    elements.right.title.textContent = describeDataframeFile(right);
     updateMatchColumn(elements.leftMatchColumn, left.columns);
     updateMatchColumn(elements.rightMatchColumn, right.columns);
     updateColumnPicker('left');
@@ -501,7 +518,7 @@ const populateDatasetSelectors = files => {
     files.forEach(file => {
       const option = document.createElement('option');
       option.value = file.name;
-      option.textContent = file.name;
+      option.textContent = describeDataframeFile(file);
       dataset.append(option);
     });
   });
@@ -515,13 +532,16 @@ const renderQueryDataframes = files => {
     const details = document.createElement('span');
     const filename = document.createElement('span');
     const alias = document.createElement('code');
+    const badge = document.createElement('span');
     label.className = 'query-dataframe';
     checkbox.type = 'checkbox';
     checkbox.value = file.name;
     checkbox.checked = index === 0;
     filename.textContent = file.name;
+    badge.className = 'file-badge';
+    badge.textContent = file.metadataLabel ? `${file.label} · ${file.metadataLabel}` : file.label;
     alias.textContent = `frames.${file.alias}`;
-    details.append(filename, document.createElement('br'), alias);
+    details.append(filename, badge, document.createElement('br'), alias);
     label.append(checkbox, details);
     elements.queryDataframes.append(label);
   });
@@ -534,11 +554,19 @@ const renderQueryResult = result => {
   elements.queryBody.replaceChildren();
 
   const headerRow = document.createElement('tr');
-  result.columns.forEach(column => {
+  result.columns.forEach((column, index) => {
     const header = document.createElement('th');
     const label = document.createElement('button');
+    const title = document.createElement('span');
+    const subtitle = document.createElement('span');
     label.type = 'button';
-    label.textContent = column;
+    label.className = 'column-header';
+    title.className = 'column-header-title';
+    subtitle.className = 'column-header-type';
+    title.textContent = column;
+    subtitle.textContent = result.columnTypes?.[index] ?? '';
+    subtitle.hidden = subtitle.textContent === '';
+    label.append(title, subtitle);
     header.append(label);
     headerRow.append(header);
   });
@@ -600,8 +628,8 @@ const initialize = async () => {
     availableFiles = await loadDatasetFiles();
     if (availableFiles.length === 0) {
       elements.comparisonStatus.textContent =
-        'No CSV files found. Generate a DataFrame export, then refresh.';
-      elements.queryStatus.textContent = 'No CSV files available for queries.';
+        'No DataFrame files found. Generate an export, then refresh.';
+      elements.queryStatus.textContent = 'No DataFrame files available for queries.';
       return;
     }
 

@@ -2,6 +2,7 @@ const { readdir, readFile, stat } = require('node:fs/promises');
 const { createServer } = require('node:http');
 const path = require('node:path');
 const { Worker } = require('node:worker_threads');
+const pl = require('nodejs-polars');
 
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.PORT ?? 8000);
@@ -16,12 +17,18 @@ const STATIC_FILES = new Map([
   ['/app.js', 'app.js'],
   ['/styles.css', 'styles.css'],
 ]);
+const DATAFRAME_FORMATS = new Map([
+  ['.csv', { kind: 'csv', label: 'CSV' }],
+  ['.parquet', { kind: 'parquet', label: 'Parquet', metadataLabel: 'schema metadata' }],
+  ['.ipc', { kind: 'ipc', label: 'IPC', metadataLabel: 'schema metadata' }],
+  ['.arrow', { kind: 'ipc', label: 'Arrow IPC', metadataLabel: 'schema metadata' }],
+]);
 
 let queryRunning = false;
 let polarsTypeFilesPromise;
 
 const dataframeAliasBase = filename => {
-  const base = path.basename(filename, '.csv').replace(/[^a-zA-Z0-9_$]/g, '_');
+  const base = path.parse(filename).name.replace(/[^a-zA-Z0-9_$]/g, '_');
   return /^[a-zA-Z_$]/.test(base) ? base : `dataframe_${base}`;
 };
 
@@ -37,14 +44,77 @@ const uniqueDataframeAlias = (filename, usedAliases) => {
   return alias;
 };
 
-const csvFiles = async () => {
+const dataframeFormat = filename => DATAFRAME_FORMATS.get(path.extname(filename).toLowerCase()) ?? null;
+
+const dataframeFiles = async () => {
   const entries = await readdir(INPUT_DIR, { withFileTypes: true });
   const filenames = entries
-    .filter(entry => entry.isFile() && entry.name.endsWith('.csv'))
+    .filter(entry => entry.isFile() && dataframeFormat(entry.name))
     .map(entry => entry.name)
     .sort((left, right) => left.localeCompare(right));
   const usedAliases = new Set();
-  return filenames.map(name => ({ name, alias: uniqueDataframeAlias(name, usedAliases) }));
+  return filenames.map(name => {
+    const format = dataframeFormat(name);
+    return {
+      name,
+      alias: uniqueDataframeAlias(name, usedAliases),
+      kind: format.kind,
+      label: format.label,
+      metadataLabel: format.metadataLabel ?? '',
+    };
+  });
+};
+
+const serializeValue = value => {
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (Buffer.isBuffer(value)) {
+    return value.toString('base64');
+  }
+  if (Array.isArray(value)) {
+    return value.map(serializeValue);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nestedValue]) => [key, serializeValue(nestedValue)]),
+    );
+  }
+  return value;
+};
+
+const safeDataframePath = async filename => {
+  if (typeof filename !== 'string' || path.basename(filename) !== filename) {
+    return null;
+  }
+  const filePath = path.join(INPUT_DIR, filename);
+  if (!dataframeFormat(filename) || path.dirname(filePath) !== INPUT_DIR) {
+    return null;
+  }
+  try {
+    const fileStat = await stat(filePath);
+    return fileStat.isFile() ? filePath : null;
+  } catch {
+    return null;
+  }
+};
+
+const readDataframe = async filePath => {
+  const extension = path.extname(filePath).toLowerCase();
+  switch (extension) {
+    case '.csv':
+      return pl.readCSV(filePath);
+    case '.parquet':
+      return pl.readParquet(filePath);
+    case '.ipc':
+    case '.arrow':
+      return pl.readIPC(await readFile(filePath));
+    default:
+      throw new Error(`Unsupported DataFrame format: ${extension || path.basename(filePath)}`);
+  }
 };
 
 const polarsTypeFiles = () => {
@@ -95,22 +165,6 @@ const readRequestBody = request =>
     request.on('error', reject);
   });
 
-const safeCsvPath = async filename => {
-  if (typeof filename !== 'string' || path.basename(filename) !== filename) {
-    return null;
-  }
-  const filePath = path.join(INPUT_DIR, filename);
-  if (!filename.endsWith('.csv') || path.dirname(filePath) !== INPUT_DIR) {
-    return null;
-  }
-  try {
-    const fileStat = await stat(filePath);
-    return fileStat.isFile() ? filePath : null;
-  } catch {
-    return null;
-  }
-};
-
 const runQuery = ({ code, files }) =>
   new Promise((resolve, reject) => {
     const worker = new Worker(path.join(ROOT, 'query-worker.js'), {
@@ -137,11 +191,11 @@ const runQuery = ({ code, files }) =>
   });
 
 const serveStaticFile = async (response, pathname) => {
-  const csvFilename = pathname.startsWith('/') ? decodeURIComponent(pathname.slice(1)) : '';
+  const dataframeFilename = pathname.startsWith('/') ? decodeURIComponent(pathname.slice(1)) : '';
   const staticFilename = STATIC_FILES.get(pathname);
   const filePath = staticFilename
     ? path.join(ROOT, staticFilename)
-    : await safeCsvPath(csvFilename);
+    : await safeDataframePath(dataframeFilename);
   if (!filePath) {
     send(response, 404, 'text/plain; charset=utf-8', 'Not found');
     return;
@@ -152,7 +206,9 @@ const serveStaticFile = async (response, pathname) => {
     '.css': 'text/css; charset=utf-8',
     '.csv': 'text/csv; charset=utf-8',
     '.html': 'text/html; charset=utf-8',
+    '.ipc': 'application/octet-stream',
     '.js': 'text/javascript; charset=utf-8',
+    '.parquet': 'application/octet-stream',
   };
   send(
     response,
@@ -190,7 +246,7 @@ const handleQuery = async (request, response) => {
     queryRunning = true;
     ownsQuerySlot = true;
 
-    const availableFiles = await csvFiles();
+    const availableFiles = await dataframeFiles();
     const selectedFiles = body.dataframes.map(filename => {
       const dataframe = availableFiles.find(file => file.name === filename);
       if (!dataframe) {
@@ -212,11 +268,44 @@ const handleQuery = async (request, response) => {
   }
 };
 
+const handleDataframeLoad = async (response, filename) => {
+  const filePath = await safeDataframePath(filename);
+  if (!filePath) {
+    sendJson(response, 404, { error: `Unknown DataFrame: ${filename}` });
+    return;
+  }
+
+  const dataFrame = await readDataframe(filePath);
+  const format = dataframeFormat(filename);
+  const columns = dataFrame.columns;
+  const rows = dataFrame
+    .toRecords()
+    .map(record => columns.map(column => serializeValue(record[column])));
+  const columnTypes = dataFrame.dtypes.map(dtype => dtype.constructor?.name ?? String(dtype));
+  sendJson(response, 200, {
+    filename,
+    columns,
+    columnTypes,
+    rows,
+    kind: format.kind,
+    label: format.label,
+    metadataLabel: format.metadataLabel ?? '',
+  });
+};
+
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url ?? '/', `http://${HOST}:${PORT}`);
+    if (request.method === 'GET' && url.pathname === '/api/dataframe-files') {
+      sendJson(response, 200, { files: await dataframeFiles() });
+      return;
+    }
     if (request.method === 'GET' && url.pathname === '/api/csv-files') {
-      sendJson(response, 200, { files: await csvFiles() });
+      sendJson(response, 200, { files: await dataframeFiles() });
+      return;
+    }
+    if (request.method === 'GET' && url.pathname === '/api/dataframe') {
+      await handleDataframeLoad(response, url.searchParams.get('filename') ?? '');
       return;
     }
     if (request.method === 'GET' && url.pathname === '/api/polars-types') {
