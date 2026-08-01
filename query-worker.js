@@ -58,25 +58,39 @@ const run = async () => {
   let dataFrame;
   let plan = '';
   let optimizedPlan = '';
+  let totalRows = 0;
+  const page = Math.max(1, Number(workerData.page ?? 1));
+  const pageSize = Math.max(1, Number(workerData.pageSize ?? 200));
+  const offset = (page - 1) * pageSize;
+
   if (isLazyDataFrame(result)) {
     plan = result.describePlan();
     optimizedPlan = result.describeOptimizedPlan();
-    dataFrame = await result.limit(workerData.rowLimit + 1).collect();
+    const countFrame = await result.select(pl.len()).collect();
+    const countRecord = countFrame.toRecords()[0] ?? {};
+    totalRows = Number(countRecord?.len ?? countRecord?.[0] ?? 0);
+    dataFrame = await result.slice(offset, pageSize).collect();
   } else if (isDataFrame(result)) {
     dataFrame = result;
+    totalRows = Number(dataFrame.height ?? dataFrame.shape?.[0] ?? 0);
   } else {
     throw new Error('The query must return a Polars DataFrame or LazyDataFrame.');
   }
 
-  const allRows = dataFrame.toRecords();
-  const truncated = allRows.length > workerData.rowLimit;
-  const rows = allRows.slice(0, workerData.rowLimit).map(serializeValue);
+  const pageDataFrame = isLazyDataFrame(result) ? dataFrame : dataFrame.slice(offset, pageSize);
+  const rows = pageDataFrame.toRecords().map(serializeValue);
   parentPort.postMessage({
     columns: dataFrame.columns,
     columnTypes: dataFrame.dtypes.map(dtype => dtype.constructor?.name ?? String(dtype)),
     rows,
     rowCount: rows.length,
-    truncated,
+    totalRows,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(totalRows / pageSize)),
+    hasPreviousPage: page > 1,
+    hasNextPage: page * pageSize < totalRows,
+    truncated: false,
     durationMs: Math.round((performance.now() - startedAt) * 10) / 10,
     plan,
     optimizedPlan,

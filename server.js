@@ -10,7 +10,7 @@ const ROOT = path.join(__dirname);
 const INPUT_DIR = path.join(ROOT, 'input');
 const POLARS_TYPES_ROOT = path.join(ROOT, 'node_modules', 'nodejs-polars', 'bin');
 const QUERY_TIMEOUT_MS = 5_000;
-const QUERY_ROW_LIMIT = 500;
+const DEFAULT_PAGE_SIZE = 200;
 const MAX_REQUEST_BYTES = 64 * 1024;
 const STATIC_FILES = new Map([
   ['/', 'index.html'],
@@ -165,10 +165,10 @@ const readRequestBody = request =>
     request.on('error', reject);
   });
 
-const runQuery = ({ code, files }) =>
+const runQuery = ({ code, files, page, pageSize }) =>
   new Promise((resolve, reject) => {
     const worker = new Worker(path.join(ROOT, 'query-worker.js'), {
-      workerData: { code, files, rowLimit: QUERY_ROW_LIMIT },
+      workerData: { code, files, page, pageSize },
     });
     const timeout = setTimeout(() => {
       worker.terminate();
@@ -255,7 +255,14 @@ const handleQuery = async (request, response) => {
       return { ...dataframe, path: path.join(INPUT_DIR, dataframe.name) };
     });
 
-    const result = await runQuery({ code: body.code, files: selectedFiles });
+    const page = Number.isFinite(Number(body.page)) ? Number(body.page) : 1;
+    const pageSize = Number.isFinite(Number(body.pageSize)) ? Number(body.pageSize) : DEFAULT_PAGE_SIZE;
+    const result = await runQuery({
+      code: body.code,
+      files: selectedFiles,
+      page: Math.max(1, page),
+      pageSize: Math.max(1, Math.min(pageSize, 1_000)),
+    });
     sendJson(response, 200, result);
   } catch (error) {
     sendJson(response, 400, {
@@ -268,7 +275,7 @@ const handleQuery = async (request, response) => {
   }
 };
 
-const handleDataframeLoad = async (response, filename) => {
+const handleDataframeLoad = async (response, filename, page, pageSize) => {
   const filePath = await safeDataframePath(filename);
   if (!filePath) {
     sendJson(response, 404, { error: `Unknown DataFrame: ${filename}` });
@@ -277,8 +284,13 @@ const handleDataframeLoad = async (response, filename) => {
 
   const dataFrame = await readDataframe(filePath);
   const format = dataframeFormat(filename);
+  const totalRows = Number(dataFrame.height ?? dataFrame.shape?.[0] ?? 0);
+  const safePage = Number.isFinite(page) && page > 0 ? page : 1;
+  const safePageSize = Number.isFinite(pageSize) && pageSize > 0 ? pageSize : DEFAULT_PAGE_SIZE;
+  const offset = (safePage - 1) * safePageSize;
+  const pageDataFrame = dataFrame.slice(offset, safePageSize);
   const columns = dataFrame.columns;
-  const rows = dataFrame
+  const rows = pageDataFrame
     .toRecords()
     .map(record => columns.map(column => serializeValue(record[column])));
   const columnTypes = dataFrame.dtypes.map(dtype => dtype.constructor?.name ?? String(dtype));
@@ -287,6 +299,12 @@ const handleDataframeLoad = async (response, filename) => {
     columns,
     columnTypes,
     rows,
+    totalRows,
+    page: safePage,
+    pageSize: safePageSize,
+    totalPages: Math.max(1, Math.ceil(totalRows / safePageSize)),
+    hasPreviousPage: safePage > 1,
+    hasNextPage: safePage * safePageSize < totalRows,
     kind: format.kind,
     label: format.label,
     metadataLabel: format.metadataLabel ?? '',
@@ -296,28 +314,28 @@ const handleDataframeLoad = async (response, filename) => {
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url ?? '/', `http://${HOST}:${PORT}`);
-    if (request.method === 'GET' && url.pathname === '/api/dataframe-files') {
+    const pathname = url.pathname;
+
+    if (request.method === 'GET' && pathname === '/api/dataframe-files') {
       sendJson(response, 200, { files: await dataframeFiles() });
       return;
     }
-    if (request.method === 'GET' && url.pathname === '/api/csv-files') {
-      sendJson(response, 200, { files: await dataframeFiles() });
+    if (request.method === 'GET' && pathname === '/api/dataframe') {
+      const page = Number(url.searchParams.get('page') ?? '1');
+      const pageSize = Number(url.searchParams.get('pageSize') ?? String(DEFAULT_PAGE_SIZE));
+      await handleDataframeLoad(response, url.searchParams.get('filename') ?? '', page, pageSize);
       return;
     }
-    if (request.method === 'GET' && url.pathname === '/api/dataframe') {
-      await handleDataframeLoad(response, url.searchParams.get('filename') ?? '');
-      return;
-    }
-    if (request.method === 'GET' && url.pathname === '/api/polars-types') {
+    if (request.method === 'GET' && pathname === '/api/polars-types') {
       sendJson(response, 200, { files: await polarsTypeFiles() });
       return;
     }
-    if (request.method === 'POST' && url.pathname === '/api/query') {
+    if (request.method === 'POST' && pathname === '/api/query') {
       await handleQuery(request, response);
       return;
     }
     if (request.method === 'GET') {
-      await serveStaticFile(response, url.pathname);
+      await serveStaticFile(response, pathname);
       return;
     }
     send(response, 405, 'text/plain; charset=utf-8', 'Method not allowed');

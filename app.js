@@ -7,6 +7,11 @@ const elements = {
   rightMatchColumn: document.querySelector('#right-match-column'),
   search: document.querySelector('#search'),
   differencesOnly: document.querySelector('#differences-only'),
+  comparePageSize: document.querySelector('#compare-page-size'),
+  comparePrevPage: document.querySelector('#compare-prev-page'),
+  compareNextPage: document.querySelector('#compare-next-page'),
+  comparePageIndicator: document.querySelector('#compare-page-indicator'),
+  comparePaginationControls: document.querySelector('#compare-pagination-controls'),
   comparisonStatus: document.querySelector('#comparison-status'),
   columnPickers: [...document.querySelectorAll('.column-picker')],
   left: {
@@ -36,6 +41,11 @@ const elements = {
   queryStatus: document.querySelector('#query-status'),
   queryOutput: document.querySelector('#query-output'),
   queryMetadata: document.querySelector('#query-metadata'),
+  queryPageSize: document.querySelector('#query-page-size'),
+  queryPrevPage: document.querySelector('#query-prev-page'),
+  queryNextPage: document.querySelector('#query-next-page'),
+  queryPageIndicator: document.querySelector('#query-page-indicator'),
+  queryPaginationControls: document.querySelector('#query-pagination-controls'),
   queryHead: document.querySelector('#query-head'),
   queryBody: document.querySelector('#query-body'),
   queryPlan: document.querySelector('#query-plan'),
@@ -60,6 +70,8 @@ let visibleColumns = { left: new Set(), right: new Set() };
 let monacoApi;
 let monacoEditor;
 let frameTypesDisposable;
+let comparePage = 1;
+let queryPage = 1;
 
 const queryCode = () =>
   monacoEditor ? monacoEditor.getValue() : elements.queryEditorFallback.value;
@@ -417,10 +429,13 @@ const renderComparison = () => {
   elements.comparisonStatus.textContent = `${pairs.length.toLocaleString()} rows · ${counts.changed.toLocaleString()} changed · ${counts['left-only'].toLocaleString()} left only · ${counts['right-only'].toLocaleString()} right only`;
 };
 
-const loadDataset = async filename => {
-  const response = await fetch(`/api/dataframe?filename=${encodeURIComponent(filename)}`, {
-    cache: 'no-store',
-  });
+const loadDataset = async (filename, page = 1, pageSize = Number(elements.comparePageSize?.value ?? 200)) => {
+  const response = await fetch(
+    `/api/dataframe?filename=${encodeURIComponent(filename)}&page=${page}&pageSize=${pageSize}`,
+    {
+      cache: 'no-store',
+    },
+  );
   if (!response.ok) {
     throw new Error(`Could not load ${filename} (HTTP ${response.status})`);
   }
@@ -489,12 +504,21 @@ const updateColumnPicker = side => {
   });
 };
 
+const updateComparePagination = result => {
+  const totalPages = Number(result.totalPages ?? 1);
+  const page = Number(result.page ?? 1);
+  elements.comparePageIndicator.textContent = `Page ${page.toLocaleString()} of ${totalPages.toLocaleString()}`;
+  elements.comparePrevPage.disabled = page <= 1;
+  elements.compareNextPage.disabled = page >= totalPages;
+  elements.comparePaginationControls.hidden = totalPages <= 1;
+};
+
 const loadComparison = async () => {
   elements.comparisonStatus.textContent = 'Loading DataFrames…';
   try {
     const [left, right] = await Promise.all([
-      loadDataset(elements.leftDataset.value),
-      loadDataset(elements.rightDataset.value),
+      loadDataset(elements.leftDataset.value, comparePage, Number(elements.comparePageSize?.value ?? 200)),
+      loadDataset(elements.rightDataset.value, comparePage, Number(elements.comparePageSize?.value ?? 200)),
     ]);
     frames = { left, right };
     sort = { side: '', column: '', direction: 'ascending' };
@@ -505,6 +529,7 @@ const loadComparison = async () => {
     updateMatchColumn(elements.rightMatchColumn, right.columns);
     updateColumnPicker('left');
     updateColumnPicker('right');
+    updateComparePagination(left);
     renderComparison();
   } catch (error) {
     elements.comparisonStatus.textContent =
@@ -547,9 +572,18 @@ const renderQueryDataframes = files => {
   });
 };
 
+const updateQueryPagination = result => {
+  const totalPages = Number(result.totalPages ?? 1);
+  const page = Number(result.page ?? 1);
+  elements.queryPageIndicator.textContent = `Page ${page.toLocaleString()} of ${totalPages.toLocaleString()}`;
+  elements.queryPrevPage.disabled = page <= 1;
+  elements.queryNextPage.disabled = page >= totalPages;
+  elements.queryPaginationControls.hidden = totalPages <= 1;
+};
+
 const renderQueryResult = result => {
   elements.queryOutput.hidden = false;
-  elements.queryMetadata.textContent = `${result.rowCount.toLocaleString()} rows${result.truncated ? ' (truncated)' : ''} · ${result.durationMs.toLocaleString()} ms`;
+  elements.queryMetadata.textContent = `${result.rowCount.toLocaleString()} of ${result.totalRows.toLocaleString()} rows · ${result.durationMs.toLocaleString()} ms`;
   elements.queryHead.replaceChildren();
   elements.queryBody.replaceChildren();
 
@@ -582,12 +616,13 @@ const renderQueryResult = result => {
   elements.queryPlan.textContent = result.plan || 'Eager DataFrame: no lazy plan available.';
   elements.queryOptimizedPlan.textContent =
     result.optimizedPlan || 'Eager DataFrame: no optimized lazy plan available.';
+  updateQueryPagination(result);
 };
 
 const selectedQueryDataframes = () =>
   [...elements.queryDataframes.querySelectorAll('input:checked')].map(input => input.value);
 
-const executeQuery = async () => {
+const executeQuery = async (page = queryPage) => {
   const code = queryCode().trim();
   const dataframes = selectedQueryDataframes();
   elements.queryStatus.classList.remove('error');
@@ -606,12 +641,18 @@ const executeQuery = async () => {
     const response = await fetch('/api/query', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, dataframes }),
+      body: JSON.stringify({
+        code,
+        dataframes,
+        page,
+        pageSize: Number(elements.queryPageSize?.value ?? 200),
+      }),
     });
     const result = await response.json();
     if (!response.ok) {
       throw new Error(result.error ?? `Query failed (HTTP ${response.status})`);
     }
+    queryPage = page;
     renderQueryResult(result);
     elements.queryStatus.textContent = 'Query complete.';
   } catch (error) {
@@ -621,6 +662,40 @@ const executeQuery = async () => {
   } finally {
     elements.runQuery.disabled = false;
   }
+};
+
+const attachPaginationHandlers = () => {
+  elements.comparePageSize?.addEventListener('change', () => {
+    comparePage = 1;
+    loadComparison();
+  });
+
+  elements.comparePrevPage?.addEventListener('click', () => {
+    if (comparePage > 1) {
+      comparePage -= 1;
+      loadComparison();
+    }
+  });
+
+  elements.compareNextPage?.addEventListener('click', () => {
+    comparePage += 1;
+    loadComparison();
+  });
+
+  elements.queryPageSize?.addEventListener('change', () => {
+    queryPage = 1;
+    executeQuery(queryPage);
+  });
+
+  elements.queryPrevPage?.addEventListener('click', () => {
+    if (queryPage > 1) {
+      executeQuery(queryPage - 1);
+    }
+  });
+
+  elements.queryNextPage?.addEventListener('click', () => {
+    executeQuery(queryPage + 1);
+  });
 };
 
 const initialize = async () => {
@@ -636,6 +711,7 @@ const initialize = async () => {
     populateDatasetSelectors(availableFiles);
     renderQueryDataframes(availableFiles);
     updateFrameTypes(availableFiles);
+    attachPaginationHandlers();
     elements.rightDataset.selectedIndex = availableFiles.length > 1 ? 1 : 0;
     setQueryCode(
       sessionStorage.getItem('dataframe-debug-query') ??
@@ -685,7 +761,7 @@ document.addEventListener('click', event => {
   });
 });
 
-elements.runQuery.addEventListener('click', executeQuery);
+elements.runQuery.addEventListener('click', () => executeQuery(1));
 elements.queryEditorFallback.addEventListener('keydown', event => {
   if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
     event.preventDefault();

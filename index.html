@@ -62,13 +62,29 @@
             Search values
             <input id="search" type="search" placeholder="Filter rows…" autocomplete="off" />
           </label>
+          <label>
+            Page size
+            <select id="compare-page-size">
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="200" selected>200</option>
+              <option value="500">500</option>
+            </select>
+          </label>
           <label class="checkbox-label">
             <input id="differences-only" type="checkbox" />
             Differences only
           </label>
         </div>
 
-        <p id="comparison-status" class="status" role="status"></p>
+        <div class="comparison-toolbar">
+          <div class="pagination-controls" id="compare-pagination-controls" hidden>
+            <button type="button" id="compare-prev-page">← Prev</button>
+            <span id="compare-page-indicator"></span>
+            <button type="button" id="compare-next-page">Next →</button>
+          </div>
+          <p id="comparison-status" class="status" role="status"></p>
+        </div>
         <div class="legend">
           <span class="legend-item"
             ><span class="swatch" style="background: var(--changed)"></span>Changed cell</span
@@ -135,14 +151,34 @@
                 hidden
               ></textarea>
               <div class="query-actions">
-                <span class="hint">Run with Cmd/Ctrl + Enter</span>
-                <button id="run-query" class="primary-button" type="button">Run query</button>
+                <div class="query-pagination-controls">
+                  <label class="query-page-size">
+                    Page size
+                    <select id="query-page-size">
+                      <option value="50">50</option>
+                      <option value="100">100</option>
+                      <option value="200" selected>200</option>
+                      <option value="500">500</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="query-actions-right">
+                  <span class="hint">Run with Cmd/Ctrl + Enter</span>
+                  <button id="run-query" class="primary-button" type="button">Run query</button>
+                </div>
               </div>
               <p id="query-status" class="status" role="status"></p>
             </section>
 
             <section id="query-output" class="query-output" hidden>
-              <h2>Result</h2>
+              <div class="query-output-header">
+                <h2>Result</h2>
+                <div class="pagination-controls" id="query-pagination-controls" hidden>
+                  <button type="button" id="query-prev-page">← Prev</button>
+                  <span id="query-page-indicator"></span>
+                  <button type="button" id="query-next-page">Next →</button>
+                </div>
+              </div>
               <p id="query-metadata" class="query-metadata"></p>
               <div class="table-container">
                 <table>
