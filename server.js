@@ -1,4 +1,7 @@
-const { readdir, readFile, stat } = require('node:fs/promises');
+const { createWriteStream } = require('node:fs');
+const { pipeline } = require('node:stream/promises');
+const { randomUUID } = require('node:crypto');
+const { readdir, readFile, rename, rm, stat } = require('node:fs/promises');
 const { createServer } = require('node:http');
 const path = require('node:path');
 const { Worker } = require('node:worker_threads');
@@ -12,6 +15,7 @@ const POLARS_TYPES_ROOT = path.join(ROOT, 'node_modules', 'nodejs-polars', 'bin'
 const QUERY_TIMEOUT_MS = 5_000;
 const DEFAULT_PAGE_SIZE = 200;
 const MAX_REQUEST_BYTES = 64 * 1024;
+const MAX_UPLOAD_BYTES = 512 * 1024 * 1024;
 const STATIC_FILES = new Map([
   ['/', 'index.html'],
   ['/app.js', 'app.js'],
@@ -106,7 +110,9 @@ const readDataframe = async filePath => {
   const extension = path.extname(filePath).toLowerCase();
   switch (extension) {
     case '.csv':
-      return pl.readCSV(filePath);
+      return pl.readCSV(filePath , {
+        tryParseDates: true,
+      });
     case '.parquet':
       return pl.readParquet(filePath);
     case '.ipc':
@@ -311,6 +317,42 @@ const handleDataframeLoad = async (response, filename, page, pageSize) => {
   });
 };
 
+const handleDataframeUpload = async (request, response) => {
+  const filename = request.headers['x-dataframe-filename'];
+  if (typeof filename !== 'string' || path.basename(filename) !== filename || !dataframeFormat(filename)) {
+    sendJson(response, 400, { error: 'Upload a file with a supported DataFrame extension.' });
+    return;
+  }
+  const contentLength = Number(request.headers['content-length'] ?? 0);
+  if (contentLength > MAX_UPLOAD_BYTES) {
+    sendJson(response, 413, { error: 'DataFrame upload is limited to 512 MB.' });
+    return;
+  }
+
+  const temporaryPath = path.join(
+    INPUT_DIR,
+    `.${randomUUID()}${path.extname(filename).toLowerCase()}`,
+  );
+  try {
+    let receivedBytes = 0;
+    request.on('data', chunk => {
+      receivedBytes += chunk.length;
+      if (receivedBytes > MAX_UPLOAD_BYTES) {
+        request.destroy(new Error('DataFrame upload is limited to 512 MB.'));
+      }
+    });
+    await pipeline(request, createWriteStream(temporaryPath, { flags: 'wx' }));
+    await readDataframe(temporaryPath);
+    await rename(temporaryPath, path.join(INPUT_DIR, filename));
+    sendJson(response, 200, { filename });
+  } catch (error) {
+    await rm(temporaryPath, { force: true });
+    sendJson(response, error.message.includes('512 MB') ? 413 : 400, {
+      error: error instanceof Error ? error.message : 'Unable to upload DataFrame.',
+    });
+  }
+};
+
 const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url ?? '/', `http://${HOST}:${PORT}`);
@@ -324,6 +366,10 @@ const server = createServer(async (request, response) => {
       const page = Number(url.searchParams.get('page') ?? '1');
       const pageSize = Number(url.searchParams.get('pageSize') ?? String(DEFAULT_PAGE_SIZE));
       await handleDataframeLoad(response, url.searchParams.get('filename') ?? '', page, pageSize);
+      return;
+    }
+    if (request.method === 'POST' && pathname === '/api/dataframe-upload') {
+      await handleDataframeUpload(request, response);
       return;
     }
     if (request.method === 'GET' && pathname === '/api/polars-types') {

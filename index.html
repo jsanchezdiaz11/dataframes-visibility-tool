@@ -8,8 +8,22 @@
   </head>
   <body>
     <main>
-      <h1>DataFrame viewer</h1>
-      <p class="description">Inspect, compare, and query local CSV, Parquet, and IPC exports with Polars.</p>
+      <div class="page-header">
+        <div>
+          <h1>DataFrame viewer</h1>
+          <p class="description">Inspect, compare, and query local CSV, Parquet, and IPC exports with Polars.</p>
+        </div>
+        <div class="upload-control">
+          <input id="dataframe-upload" type="file" accept=".csv,.parquet,.arrow,.ipc" multiple hidden />
+          <label class="upload-button" for="dataframe-upload" title="Upload DataFrames">
+            <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+              <path d="M12 16V4m0 0L7 9m5-5 5 5M5 15v4h14v-4" />
+            </svg>
+            <span>Upload DataFrames</span>
+          </label>
+          <span id="upload-status" class="upload-status" role="status"></span>
+        </div>
+      </div>
 
       <div class="tabs" role="tablist">
         <button class="tab" type="button" role="tab" aria-selected="true" data-panel="#compare">
@@ -133,6 +147,12 @@
           </aside>
 
           <div class="query-workspace">
+            <div class="query-tabs" role="tablist" aria-label="Query tabs">
+              <div id="query-tabs-list" class="query-tabs-list"></div>
+              <button id="new-query-tab" class="query-tab-add" type="button" title="New query">
+                +
+              </button>
+            </div>
             <section class="query-editor-card">
               <h2>Polars query</h2>
               <p class="hint">

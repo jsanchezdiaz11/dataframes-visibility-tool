@@ -6,6 +6,8 @@ const elements = {
   leftMatchColumn: document.querySelector('#left-match-column'),
   rightMatchColumn: document.querySelector('#right-match-column'),
   search: document.querySelector('#search'),
+  dataframeUpload: document.querySelector('#dataframe-upload'),
+  uploadStatus: document.querySelector('#upload-status'),
   differencesOnly: document.querySelector('#differences-only'),
   comparePageSize: document.querySelector('#compare-page-size'),
   comparePrevPage: document.querySelector('#compare-prev-page'),
@@ -35,6 +37,8 @@ const elements = {
     showAllColumns: document.querySelector('#right-show-all-columns'),
   },
   queryDataframes: document.querySelector('#query-dataframes'),
+  queryTabsList: document.querySelector('#query-tabs-list'),
+  newQueryTab: document.querySelector('#new-query-tab'),
   queryEditor: document.querySelector('#query-editor'),
   queryEditorFallback: document.querySelector('#query-editor-fallback'),
   runQuery: document.querySelector('#run-query'),
@@ -71,7 +75,12 @@ let monacoApi;
 let monacoEditor;
 let frameTypesDisposable;
 let comparePage = 1;
-let queryPage = 1;
+let queryTabs = [];
+let activeQueryTabId = '';
+let nextQueryTabId = 1;
+const QUERY_TABS_STORAGE_KEY = 'dataframe-debug-query-tabs';
+
+const activeQueryTab = () => queryTabs.find(tab => tab.id === activeQueryTabId);
 
 const queryCode = () =>
   monacoEditor ? monacoEditor.getValue() : elements.queryEditorFallback.value;
@@ -82,6 +91,159 @@ const setQueryCode = code => {
     return;
   }
   elements.queryEditorFallback.value = code;
+};
+
+const saveActiveQueryTab = () => {
+  const tab = activeQueryTab();
+  if (!tab) return;
+  tab.code = queryCode();
+  tab.dataframes = selectedQueryDataframes();
+  tab.pageSize = Number(elements.queryPageSize?.value ?? 200);
+  persistQueryTabs();
+};
+
+const persistQueryTabs = () => {
+  sessionStorage.setItem(
+    QUERY_TABS_STORAGE_KEY,
+    JSON.stringify({
+      activeQueryTabId,
+      tabs: queryTabs.map(({ id, name, code, dataframes, page, pageSize }) => ({
+        id,
+        name,
+        code,
+        dataframes,
+        page,
+        pageSize,
+      })),
+    }),
+  );
+};
+
+const renameQueryTab = tab => {
+  const name = window.prompt('Tab name', tab.name);
+  if (name === null) return;
+  const trimmedName = name.trim();
+  if (!trimmedName) return;
+  tab.name = trimmedName;
+  persistQueryTabs();
+  renderQueryTabs();
+};
+
+const closeQueryTab = id => {
+  const tabIndex = queryTabs.findIndex(tab => tab.id === id);
+  if (tabIndex < 0) return;
+  const wasActive = id === activeQueryTabId;
+  if (wasActive) saveActiveQueryTab();
+  queryTabs.splice(tabIndex, 1);
+  if (queryTabs.length === 0) {
+    createQueryTab();
+    return;
+  }
+  if (wasActive) {
+    const nextTab = queryTabs[Math.min(tabIndex, queryTabs.length - 1)];
+    activeQueryTabId = nextTab.id;
+    activateQueryTab(nextTab.id);
+    return;
+  }
+  persistQueryTabs();
+  renderQueryTabs();
+};
+
+const renderQueryTabs = () => {
+  elements.queryTabsList.replaceChildren();
+  queryTabs.forEach(tab => {
+    const tabItem = document.createElement('div');
+    const button = document.createElement('button');
+    const closeButton = document.createElement('button');
+    tabItem.className = 'query-tab-item';
+    button.type = 'button';
+    button.className = 'query-tab';
+    button.setAttribute('role', 'tab');
+    button.setAttribute('aria-selected', String(tab.id === activeQueryTabId));
+    button.textContent = tab.name;
+    button.title = 'Double-click to rename';
+    button.addEventListener('click', () => activateQueryTab(tab.id));
+    button.addEventListener('dblclick', () => renameQueryTab(tab));
+    closeButton.type = 'button';
+    closeButton.className = 'query-tab-close';
+    closeButton.setAttribute('aria-label', `Close ${tab.name}`);
+    closeButton.title = `Close ${tab.name}`;
+    closeButton.textContent = '×';
+    closeButton.addEventListener('click', event => {
+      event.stopPropagation();
+      closeQueryTab(tab.id);
+    });
+    tabItem.append(button, closeButton);
+    elements.queryTabsList.append(tabItem);
+  });
+};
+
+const createQueryTab = (code = '') => {
+  const tab = {
+    id: `query-${nextQueryTabId++}`,
+    name: `Query ${queryTabs.length + 1}`,
+    code,
+    dataframes: availableFiles.map(file => file.name),
+    page: 1,
+    pageSize: 200,
+    result: null,
+  };
+  queryTabs.push(tab);
+  persistQueryTabs();
+  activateQueryTab(tab.id);
+};
+
+const activateQueryTab = id => {
+  saveActiveQueryTab();
+  activeQueryTabId = id;
+  const tab = activeQueryTab();
+  if (!tab) return;
+  setQueryCode(tab.code);
+  elements.queryDataframes.querySelectorAll('input').forEach(input => {
+    input.checked = tab.dataframes.includes(input.value);
+  });
+  if (elements.queryPageSize) elements.queryPageSize.value = String(tab.pageSize);
+  elements.queryStatus.textContent = '';
+  elements.queryStatus.classList.remove('error');
+  if (tab.result) {
+    renderQueryResult(tab.result);
+  } else {
+    elements.queryOutput.hidden = true;
+  }
+  renderQueryTabs();
+  persistQueryTabs();
+  requestAnimationFrame(() => monacoEditor?.layout());
+};
+
+const restoreQueryTabs = defaultCode => {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(QUERY_TABS_STORAGE_KEY) ?? 'null');
+    if (!Array.isArray(saved?.tabs) || saved.tabs.length === 0) {
+      createQueryTab(defaultCode);
+      return;
+    }
+    queryTabs = saved.tabs.map((tab, index) => ({
+      id: typeof tab.id === 'string' ? tab.id : `query-${index + 1}`,
+      name: typeof tab.name === 'string' && tab.name.trim() ? tab.name : `Query ${index + 1}`,
+      code: typeof tab.code === 'string' ? tab.code : defaultCode,
+      dataframes:
+        Array.isArray(tab.dataframes) && tab.dataframes.length > 0
+          ? tab.dataframes.filter(filename => availableFiles.some(file => file.name === filename))
+          : availableFiles.map(file => file.name),
+      page: Number.isInteger(tab.page) && tab.page > 0 ? tab.page : 1,
+      pageSize: [50, 100, 200, 500].includes(Number(tab.pageSize)) ? Number(tab.pageSize) : 200,
+      result: null,
+    }));
+    nextQueryTabId = queryTabs.reduce((highest, tab) => {
+      const match = tab.id.match(/^query-(\d+)$/);
+      return Math.max(highest, match ? Number(match[1]) + 1 : highest);
+    }, 1);
+    const savedActiveId = saved.activeQueryTabId;
+    activateQueryTab(queryTabs.some(tab => tab.id === savedActiveId) ? savedActiveId : queryTabs[0].id);
+  } catch {
+    sessionStorage.removeItem(QUERY_TABS_STORAGE_KEY);
+    createQueryTab(defaultCode);
+  }
 };
 
 const showFallbackEditor = () => {
@@ -454,6 +616,52 @@ const loadDatasetFiles = async () => {
   return result.files;
 };
 
+const refreshAvailableFiles = async () => {
+  availableFiles = await loadDatasetFiles();
+  populateDatasetSelectors(availableFiles);
+  renderQueryDataframes(availableFiles);
+  updateFrameTypes(availableFiles);
+  if (availableFiles.length > 0) {
+    if (!availableFiles.some(file => file.name === elements.leftDataset.value)) {
+      elements.leftDataset.selectedIndex = 0;
+    }
+    if (!availableFiles.some(file => file.name === elements.rightDataset.value)) {
+      elements.rightDataset.selectedIndex = Math.min(1, availableFiles.length - 1);
+    }
+  }
+};
+
+const uploadDataframes = async files => {
+  elements.dataframeUpload.disabled = true;
+  elements.uploadStatus.textContent = `Uploading ${files.length} file${files.length === 1 ? '' : 's'}…`;
+  try {
+    for (const file of files) {
+      const response = await fetch('/api/dataframe-upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': file.type || 'application/octet-stream',
+          'X-DataFrame-Filename': file.name,
+        },
+        body: file,
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error ?? `Could not upload ${file.name}`);
+      }
+    }
+    await refreshAvailableFiles();
+    elements.uploadStatus.textContent = `${files.length} file${files.length === 1 ? '' : 's'} uploaded.`;
+    if (availableFiles.length > 0) {
+      await loadComparison();
+    }
+  } catch (error) {
+    elements.uploadStatus.textContent = error instanceof Error ? error.message : 'Upload failed.';
+  } finally {
+    elements.dataframeUpload.disabled = false;
+    elements.dataframeUpload.value = '';
+  }
+};
+
 const updateMatchColumn = (select, columns) => {
   const previousValue = select.value;
   const preferredColumn = ['meeting_id', 'id', 'relationship_id'].find(column =>
@@ -561,7 +769,7 @@ const renderQueryDataframes = files => {
     label.className = 'query-dataframe';
     checkbox.type = 'checkbox';
     checkbox.value = file.name;
-    checkbox.checked = index === 0;
+    checkbox.checked = true;
     filename.textContent = file.name;
     badge.className = 'file-badge';
     badge.textContent = file.metadataLabel ? `${file.label} · ${file.metadataLabel}` : file.label;
@@ -622,9 +830,13 @@ const renderQueryResult = result => {
 const selectedQueryDataframes = () =>
   [...elements.queryDataframes.querySelectorAll('input:checked')].map(input => input.value);
 
-const executeQuery = async (page = queryPage) => {
+const executeQuery = async (page = activeQueryTab()?.page ?? 1) => {
+  const tab = activeQueryTab();
+  if (!tab) return;
   const code = queryCode().trim();
   const dataframes = selectedQueryDataframes();
+  tab.code = code;
+  tab.dataframes = dataframes;
   elements.queryStatus.classList.remove('error');
   if (!code || dataframes.length === 0) {
     elements.queryStatus.classList.add('error');
@@ -652,7 +864,9 @@ const executeQuery = async (page = queryPage) => {
     if (!response.ok) {
       throw new Error(result.error ?? `Query failed (HTTP ${response.status})`);
     }
-    queryPage = page;
+    tab.page = page;
+    tab.pageSize = Number(elements.queryPageSize?.value ?? 200);
+    tab.result = result;
     renderQueryResult(result);
     elements.queryStatus.textContent = 'Query complete.';
   } catch (error) {
@@ -683,18 +897,20 @@ const attachPaginationHandlers = () => {
   });
 
   elements.queryPageSize?.addEventListener('change', () => {
-    queryPage = 1;
-    executeQuery(queryPage);
+    const tab = activeQueryTab();
+    if (tab) tab.page = 1;
+    executeQuery(1);
   });
 
   elements.queryPrevPage?.addEventListener('click', () => {
-    if (queryPage > 1) {
-      executeQuery(queryPage - 1);
+    const tab = activeQueryTab();
+    if (tab?.page > 1) {
+      executeQuery(tab.page - 1);
     }
   });
 
   elements.queryNextPage?.addEventListener('click', () => {
-    executeQuery(queryPage + 1);
+    executeQuery((activeQueryTab()?.page ?? 1) + 1);
   });
 };
 
@@ -713,7 +929,7 @@ const initialize = async () => {
     updateFrameTypes(availableFiles);
     attachPaginationHandlers();
     elements.rightDataset.selectedIndex = availableFiles.length > 1 ? 1 : 0;
-    setQueryCode(
+    createQueryTab(
       sessionStorage.getItem('dataframe-debug-query') ??
         `return frames.${availableFiles[0].alias}\n  .limit(100)`,
     );
@@ -724,6 +940,13 @@ const initialize = async () => {
     elements.queryStatus.textContent = message;
   }
 };
+
+elements.dataframeUpload.addEventListener('change', event => {
+  const files = [...event.target.files];
+  if (files.length > 0) {
+    uploadDataframes(files);
+  }
+});
 
 elements.tabs.forEach(tab => {
   tab.addEventListener('click', () => {
@@ -762,12 +985,14 @@ document.addEventListener('click', event => {
 });
 
 elements.runQuery.addEventListener('click', () => executeQuery(1));
+elements.newQueryTab.addEventListener('click', () => createQueryTab());
 elements.queryEditorFallback.addEventListener('keydown', event => {
   if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
     event.preventDefault();
     executeQuery();
   }
 });
+window.addEventListener('beforeunload', saveActiveQueryTab);
 
 let syncingScroll = false;
 const syncScroll = (source, destination) => {

@@ -45,6 +45,13 @@ body {
   background: var(--background);
 }
 
+.page-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
 main {
   width: min(100% - 32px, 1600px);
   margin: 32px auto;
@@ -85,6 +92,48 @@ button {
 .status,
 .hint {
   color: var(--muted);
+}
+
+.upload-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.upload-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 9px 13px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.upload-button:hover {
+  border-color: var(--accent);
+}
+
+.upload-button svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.upload-status {
+  max-width: 220px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .tabs {
@@ -360,6 +409,67 @@ tr.missing td {
   border-radius: 10px;
 }
 
+.query-tabs {
+  display: flex;
+  align-items: end;
+  gap: 4px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.query-tabs-list {
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.query-tab-item {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 2px solid transparent;
+}
+
+.query-tab,
+.query-tab-add {
+  min-height: 36px;
+  padding: 8px 12px;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+
+.query-tab[aria-selected='true'] {
+  color: var(--accent);
+}
+
+.query-tab-item:has(.query-tab[aria-selected='true']) {
+  border-bottom-color: var(--accent);
+}
+
+.query-tab-close {
+  width: 30px;
+  min-height: 36px;
+  padding: 6px 8px 8px 2px;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  font-size: 17px;
+  line-height: 1;
+}
+
+.query-tab-close:hover {
+  color: var(--danger);
+}
+
+.query-tab-add {
+  color: var(--accent);
+  font-size: 18px;
+}
+
 .query-dataframes {
   display: grid;
   gap: 8px;
@@ -401,7 +511,7 @@ tr.missing td {
 
 .query-editor {
   width: 100%;
-  height: 260px;
+  min-height: 400px;
   color: var(--text);
   background: var(--background);
   border: 1px solid var(--border);
@@ -518,6 +628,16 @@ tr.missing td {
 }
 
 @media (max-width: 900px) {
+  .page-header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .upload-control {
+    flex-wrap: wrap;
+  }
+
   .controls,
   .comparison-grid,
   .query-layout {

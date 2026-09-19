@@ -30,6 +30,10 @@ node server.js
 
 Open [http://127.0.0.1:8000](http://127.0.0.1:8000).
 
+## Upload DataFrames
+
+Use the **Upload DataFrames** button in the viewer header to add one or more local `.csv`, `.parquet`, `.arrow`, or `.ipc` files. Each upload is validated with Polars before it is added to the local `input/` directory and made available to comparison and query views.
+
 ## Run a query
 
 Open the Query tab, select the DataFrame files to load, and return a Polars DataFrame or LazyDataFrame:
